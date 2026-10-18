@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+
+# Build output
+frontend/dist/
+
+# SQLite database
+backend/crm.db
+backend/crm.db-shm
+backend/crm.db-wal
+
+# Environment files
+.env
+.env.local
+.env.production
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Test coverage
+coverage/
+
+# Agents tasks (internal)
+.agents/

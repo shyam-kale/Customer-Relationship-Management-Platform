@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polygon points='12 2 2 7 12 12 22 7 12 2'></polygon><polyline points='2 17 12 22 22 17'></polyline><polyline points='2 12 12 17 22 12'></polyline></svg>" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NexusCRM | Enterprise Revenue & Pipeline Intelligence</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <!-- GitHub Pages SPA: restore path encoded by 404.html -->
+    <script>
+      (function(){
+        var qs = window.location.search
+        if (qs && qs.indexOf('?p=') === 0) {
+          var path = decodeURIComponent(qs.slice(3).replace(/&h=.*$/, ''))
+          var hash = qs.match(/&h=([^&]*)/) ? '#' + decodeURIComponent(qs.match(/&h=([^&]*)/)[1]) : ''
+          window.history.replaceState(null, null,
+            window.location.pathname.split('/').slice(0,2).join('/') + '/' + path + hash
+          )
+        }
+      })()
+    </script>
+  </head>
+  <body class="bg-slate-950 text-slate-100 antialiased selection:bg-indigo-500 selection:text-white">
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

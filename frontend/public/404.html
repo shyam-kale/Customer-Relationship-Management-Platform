@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>NexusCRM</title>
+  <script>
+    // GitHub Pages SPA redirect trick:
+    // Encode the full URL path into the query string, then redirect to index.html.
+    // index.html reads it back and restores the path via History API.
+    var l = window.location
+    l.replace(
+      l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
+      l.pathname.split('/').slice(0, 2).join('/') +
+      '/?p=' + encodeURIComponent(l.pathname.slice(1) + l.search) +
+      (l.hash ? '&h=' + encodeURIComponent(l.hash.slice(1)) : '')
+    )
+  </script>
+</head>
+<body></body>
+</html>
