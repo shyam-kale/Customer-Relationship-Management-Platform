@@ -13,7 +13,8 @@ import {
   Search,
   X,
   Bell,
-  BellDot
+  BellDot,
+  BarChart3
 } from 'lucide-react'
 import { searchAll } from '../api'
 
@@ -23,6 +24,7 @@ const navItems = [
   { to: '/leads',     label: 'Leads',       icon: Target },
   { to: '/followups', label: 'Follow-Ups',  icon: CalendarClock },
   { to: '/pipeline',  label: 'Pipeline',    icon: Kanban },
+  { to: '/reports',   label: 'Reports',     icon: BarChart3 },
 ]
 
 const ENTITY_PATHS = { customer: '/customers', lead: '/leads', followup: '/followups', deal: '/pipeline' }

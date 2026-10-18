@@ -5,6 +5,7 @@ import Customers from './pages/Customers'
 import Leads from './pages/Leads'
 import Followups from './pages/Followups'
 import Pipeline from './pages/Pipeline'
+import Reports from './pages/Reports'
 import { Sparkles, Shield, Cpu, ExternalLink } from 'lucide-react'
 
 function App() {
@@ -25,6 +26,7 @@ function App() {
             <Route path="/leads" element={<Leads />} />
             <Route path="/followups" element={<Followups />} />
             <Route path="/pipeline" element={<Pipeline />} />
+            <Route path="/reports" element={<Reports />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
