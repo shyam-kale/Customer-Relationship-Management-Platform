@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import Modal from '../components/Modal'
 import ConfirmDialog from '../components/ConfirmDialog'
 import StatusBadge from '../components/StatusBadge'
+import CalendarGrid from '../components/CalendarGrid'
 import {
   getFollowups,
   createFollowup,
@@ -28,7 +29,10 @@ import {
   Target,
   Edit3,
   Trash2,
-  RotateCcw
+  RotateCcw,
+  Calendar,
+  Flame,
+  Eye
 } from 'lucide-react'
 
 const TYPE_CONFIG = {
@@ -61,6 +65,8 @@ export default function Followups() {
   const [confirm, setConfirm] = useState(null)
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(true)
+  const [viewMode, setViewMode] = useState('list') // 'list' or 'calendar'
+  const [timeTab, setTimeTab] = useState('today') // 'today', 'week', 'overdue'
 
   const loadData = async () => {
     try {
@@ -84,14 +90,45 @@ export default function Followups() {
   }, [])
 
   const nowIso = new Date().toISOString()
+  const now = new Date(nowIso)
+  const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString()
+  const oneWeekLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
+
+  // Snooze helper: reschedule a followup by X days
+  const snoozeFollowup = async (id, daysToAdd) => {
+    const newDate = new Date(now.getTime() + daysToAdd * 24 * 60 * 60 * 1000).toISOString().slice(0, 16)
+    try {
+      await updateFollowup(id, { scheduled_at: newDate })
+      await loadData()
+    } catch (e) {
+      setErr('Failed to snooze followup')
+    }
+  }
 
   const counts = useMemo(() => {
     const total = rows.length
     const pending = rows.filter((r) => r.status === 'pending').length
     const completed = rows.filter((r) => r.status === 'completed').length
     const overdue = rows.filter((r) => r.status === 'pending' && r.scheduled_at < nowIso).length
-    return { total, pending, completed, overdue }
-  }, [rows, nowIso])
+    const today = rows.filter((r) => r.status === 'pending' && r.scheduled_at >= nowIso && r.scheduled_at < tomorrow).length
+    const thisWeek = rows.filter((r) => r.status === 'pending' && r.scheduled_at >= nowIso && r.scheduled_at < oneWeekLater).length
+    return { total, pending, completed, overdue, today, thisWeek }
+  }, [rows, nowIso, tomorrow, oneWeekLater])
+
+  // Filter followups by time tab
+  const timeFilteredRows = useMemo(() => {
+    const pending = rows.filter((r) => r.status === 'pending')
+    switch (timeTab) {
+      case 'today':
+        return pending.filter((r) => r.scheduled_at >= nowIso && r.scheduled_at < tomorrow)
+      case 'week':
+        return pending.filter((r) => r.scheduled_at >= nowIso && r.scheduled_at < oneWeekLater)
+      case 'overdue':
+        return pending.filter((r) => r.scheduled_at < nowIso)
+      default:
+        return pending
+    }
+  }, [rows, nowIso, tomorrow, oneWeekLater, timeTab])
 
   const openAdd = () => {
     setEditing(null)
@@ -276,6 +313,55 @@ export default function Followups() {
         </button>
       </div>
 
+      {/* View Mode and Time Tabs */}
+      <div className="glass-card p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+        {/* Time Tabs */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-bold text-slate-500 uppercase mr-2">Focus:</span>
+          {['today', 'week', 'overdue'].map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setTimeTab(tab)}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                timeTab === tab
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              {tab === 'today' && `Today (${counts.today})`}
+              {tab === 'week' && `This Week (${counts.thisWeek})`}
+              {tab === 'overdue' && `Overdue (${counts.overdue})`}
+            </button>
+          ))}
+        </div>
+
+        {/* View Toggle */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setViewMode('list')}
+            className={`p-2 rounded-lg transition-all ${
+              viewMode === 'list'
+                ? 'bg-indigo-100 text-indigo-700'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+            title="List View"
+          >
+            <Eye className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setViewMode('calendar')}
+            className={`p-2 rounded-lg transition-all ${
+              viewMode === 'calendar'
+                ? 'bg-indigo-100 text-indigo-700'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+            title="Calendar View"
+          >
+            <Calendar className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
       {/* Filter and Search Bar */}
       <div className="glass-card p-4 flex flex-col md:flex-row items-center justify-between gap-3">
         <div className="relative w-full md:max-w-md">
@@ -431,14 +517,49 @@ export default function Followups() {
                       <td className="px-5 py-3.5 text-right whitespace-nowrap">
                         <div className="inline-flex items-center gap-1.5">
                           {r.status === 'pending' ? (
-                            <button
-                              onClick={() => handleQuickStatus(r.id, 'completed')}
-                              title="Mark as Completed"
-                              className="btn-sm-green"
-                            >
-                              <CheckCircle2 className="w-3 h-3" />
-                              <span>Complete</span>
-                            </button>
+                            <>
+                              <button
+                                onClick={() => handleQuickStatus(r.id, 'completed')}
+                                title="Mark as Completed"
+                                className="btn-sm-green"
+                              >
+                                <CheckCircle2 className="w-3 h-3" />
+                                <span>Complete</span>
+                              </button>
+                              {/* Snooze Dropdown */}
+                              <div className="relative group">
+                                <button
+                                  type="button"
+                                  title="Snooze this task"
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
+                                >
+                                  <Flame className="w-4 h-4" />
+                                </button>
+                                <div className="absolute right-0 mt-1 w-32 bg-white border border-slate-200 rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
+                                  <button
+                                    type="button"
+                                    onClick={() => snoozeFollowup(r.id, 1)}
+                                    className="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 text-slate-700"
+                                  >
+                                    Snooze 1 day
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => snoozeFollowup(r.id, 3)}
+                                    className="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 text-slate-700"
+                                  >
+                                    Snooze 3 days
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => snoozeFollowup(r.id, 7)}
+                                    className="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 text-slate-700 border-t border-slate-100"
+                                  >
+                                    Snooze 1 week
+                                  </button>
+                                </div>
+                              </div>
+                            </>
                           ) : (
                             <button
                               onClick={() => handleQuickStatus(r.id, 'pending')}
