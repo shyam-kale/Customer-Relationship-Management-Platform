@@ -1,21 +1,33 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend, LineChart, Line, AreaChart, Area, CartesianGrid
+  PieChart, Pie, Cell, Legend, AreaChart, Area, CartesianGrid
 } from 'recharts'
 import {
   Users, Target, Briefcase, DollarSign, TrendingUp, TrendingDown,
   Clock, AlertTriangle, ArrowUpRight, Sparkles, CheckCircle2,
   Calendar, Activity, Plus, Zap, BarChart2, Award, Shield,
-  RefreshCw, ChevronRight, Star, Phone, Mail
+  RefreshCw, ChevronRight, Star, X, Phone, Mail
 } from 'lucide-react'
-import { getDashboard, getAnalytics, quickLogActivity, getCustomers } from '../api'
+import {
+  getDashboard, getAnalytics, quickLogActivity,
+  getCustomers, getFollowups, getDeals
+} from '../api'
+import QuickAddBar from '../components/QuickAddBar'
 
 const STAGE_COLORS = ['#6366f1', '#3b82f6', '#f59e0b', '#10b981', '#f43f5e']
 const CHANNEL_COLORS = ['#6366f1', '#f59e0b', '#10b981', '#3b82f6', '#f43f5e', '#8b5cf6']
 
-// ─── Metric Card ────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function daysToClose(dateStr) {
+  return Math.floor((new Date(dateStr) - Date.now()) / 86400000)
+}
+function daysSince(dateStr) {
+  return Math.floor((Date.now() - new Date(dateStr)) / 86400000)
+}
+
+// ─── Metric Card ─────────────────────────────────────────────────────────────
 function MetricCard({ title, value, subtitle, icon: Icon, trend, trendUp = true, color = 'indigo', onClick }) {
   const themeMap = {
     indigo: { bg: 'bg-indigo-50 text-indigo-600 border-indigo-100', glow: 'group-hover:border-indigo-300', badge: 'bg-indigo-50 text-indigo-700 border-indigo-200/80' },
@@ -53,14 +65,13 @@ function MetricCard({ title, value, subtitle, icon: Icon, trend, trendUp = true,
   )
 }
 
-// ─── Health Score Ring ───────────────────────────────────────────────────────
+// ─── Health Score Ring ────────────────────────────────────────────────────────
 function HealthRing({ score = 0 }) {
   const r = 54
   const c = 2 * Math.PI * r
   const filled = (score / 100) * c
   const color = score >= 75 ? '#10b981' : score >= 50 ? '#f59e0b' : '#f43f5e'
   const label = score >= 75 ? 'Excellent' : score >= 50 ? 'Fair' : 'At Risk'
-
   return (
     <div className="flex flex-col items-center justify-center gap-1">
       <svg width="132" height="132" viewBox="0 0 132 132">
@@ -88,7 +99,7 @@ function HealthRing({ score = 0 }) {
   )
 }
 
-// ─── Custom Tooltip ──────────────────────────────────────────────────────────
+// ─── Custom Tooltip ───────────────────────────────────────────────────────────
 function CustomTooltip({ active, payload, label, prefix = '' }) {
   if (active && payload?.length) {
     return (
@@ -103,11 +114,10 @@ function CustomTooltip({ active, payload, label, prefix = '' }) {
   return null
 }
 
-// ─── Progress Bar ────────────────────────────────────────────────────────────
+// ─── Progress Bar ─────────────────────────────────────────────────────────────
 function TargetProgressBar({ current, target, label }) {
   const pct = Math.min(100, Math.round((current / target) * 100))
   const color = pct >= 80 ? 'from-emerald-500 to-emerald-400' : pct >= 50 ? 'from-amber-500 to-amber-400' : 'from-indigo-600 to-violet-500'
-
   return (
     <div>
       <div className="flex justify-between items-end mb-2">
@@ -128,7 +138,7 @@ function TargetProgressBar({ current, target, label }) {
   )
 }
 
-// ─── Quick Log Modal ─────────────────────────────────────────────────────────
+// ─── Quick Log Modal ──────────────────────────────────────────────────────────
 function QuickLogModal({ open, onClose, customers, onSaved }) {
   const [form, setForm] = useState({ customer_id: '', type: 'call', notes: '' })
   const [saving, setSaving] = useState(false)
@@ -201,28 +211,36 @@ function QuickLogModal({ open, onClose, customers, onSaved }) {
   )
 }
 
-// ─── Main Dashboard ──────────────────────────────────────────────────────────
+// ─── Main Dashboard ───────────────────────────────────────────────────────────
 export default function Dashboard() {
+  const navigate = useNavigate()
   const [data, setData] = useState(null)
   const [analytics, setAnalytics] = useState(null)
   const [customers, setCustomers] = useState([])
+  const [followups, setFollowups] = useState([])
+  const [deals, setDeals] = useState([])
   const [err, setErr] = useState(null)
   const [refreshing, setRefreshing] = useState(false)
   const [quickLog, setQuickLog] = useState(false)
   const [toast, setToast] = useState('')
+  const [dismissedAlerts, setDismissedAlerts] = useState(new Set())
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 3500) }
 
   const load = useCallback(async () => {
     try {
-      const [dashRes, analyticsRes, custRes] = await Promise.all([
+      const [dashRes, analyticsRes, custRes, fuRes, dealRes] = await Promise.all([
         getDashboard(),
         getAnalytics(),
         getCustomers(),
+        getFollowups(),
+        getDeals(),
       ])
       setData(dashRes.data)
       setAnalytics(analyticsRes.data)
       setCustomers(custRes.data || [])
+      setFollowups(fuRes.data || [])
+      setDeals(dealRes.data || [])
       setErr(null)
     } catch {
       setErr('Could not connect to CRM backend. Ensure server is active.')
@@ -258,6 +276,7 @@ export default function Dashboard() {
     )
   }
 
+  // ── Derived data ────────────────────────────────────────────────────────────
   const leadChartData = Object.entries(data.leadsByStatus || {}).map(([name, value]) => ({
     name: name.charAt(0).toUpperCase() + name.slice(1),
     value,
@@ -280,8 +299,102 @@ export default function Dashboard() {
   const leadConvRate = analytics?.performance?.leadConversionRate ?? 0
   const weightedPipeline = analytics?.forecast?.weightedPipeline ?? data.weightedPipelineValue ?? 0
 
+  // ── Smart Alerts ────────────────────────────────────────────────────────────
+  const overdueFollowupsCount = data.overdueFollowups || 0
+  const dealsClosingSoon = deals.filter(d =>
+    !['closed-won', 'closed-lost'].includes(d.stage) &&
+    d.close_date &&
+    daysToClose(d.close_date) < 7
+  ).length
+
+  // Use leads from data.leadsByStatus for stale check (safer than separate state)
+  // Actually use followups + deals derived; stale leads need lead.updated_at
+  // We compute from deal workflow proxy since leads list isn't separately loaded here.
+  const staleLeadsAlert = deals.filter(d =>
+    !['closed-won', 'closed-lost'].includes(d.stage) &&
+    d.updated_at &&
+    daysSince(d.updated_at) > 14
+  ).length > 0
+
+  const alertsList = [
+    overdueFollowupsCount > 0 && {
+      id: 'overdue',
+      color: 'border-rose-200 bg-rose-50 text-rose-900',
+      icon: '🔴',
+      text: `${overdueFollowupsCount} overdue follow-up${overdueFollowupsCount > 1 ? 's' : ''} need immediate attention`,
+      link: '/followups',
+    },
+    dealsClosingSoon > 0 && {
+      id: 'closing',
+      color: 'border-amber-200 bg-amber-50 text-amber-900',
+      icon: '🟡',
+      text: `${dealsClosingSoon} deal${dealsClosingSoon > 1 ? 's' : ''} closing within 7 days — act now`,
+      link: '/pipeline',
+    },
+    staleLeadsAlert && {
+      id: 'stale',
+      color: 'border-yellow-200 bg-yellow-50 text-yellow-900',
+      icon: '🟠',
+      text: 'Some deals have had no activity in 14+ days — review required',
+      link: '/pipeline',
+    },
+  ].filter(Boolean)
+
+  const visibleAlerts = alertsList.filter(a => !dismissedAlerts.has(a.id))
+
+  // ── Revenue Forecast monthly data ─────────────────────────────────────────
+  const monthlyData = (() => {
+    const months = []
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date()
+      d.setMonth(d.getMonth() - i)
+      const key = d.toISOString().slice(0, 7) // YYYY-MM
+      const label = d.toLocaleString('default', { month: 'short' })
+      const actual = deals
+        .filter(d2 => d2.stage === 'closed-won' && (d2.close_date || '').startsWith(key))
+        .reduce((s, d2) => s + Number(d2.value || 0), 0)
+      const pipeline = deals
+        .filter(d2 => !['closed-won', 'closed-lost'].includes(d2.stage) && (d2.updated_at || '').startsWith(key))
+        .reduce((s, d2) => s + Number(d2.value || 0) * 0.5, 0)
+      months.push({ month: label, actual, pipeline })
+    }
+    return months
+  })()
+
+  // ── Activity Heatmap — last 70 days ──────────────────────────────────────
+  const heatmapCells = (() => {
+    const cells = []
+    const history = data.recentActivity || []
+    for (let i = 69; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 86400000)
+      const dateStr = d.toISOString().slice(0, 10)
+      const count = history.filter(h => (h.changed_at || '').slice(0, 10) === dateStr).length
+      cells.push({ dateStr, count })
+    }
+    return cells
+  })()
+
+  function heatColor(count) {
+    if (count === 0) return 'bg-slate-100'
+    if (count <= 2) return 'bg-indigo-200'
+    if (count <= 4) return 'bg-indigo-400'
+    return 'bg-indigo-600'
+  }
+
+  // ── Top 5 Deals at Risk ──────────────────────────────────────────────────
+  const dealsAtRisk = deals
+    .filter(d => !['closed-won', 'closed-lost'].includes(d.stage) && d.close_date && daysToClose(d.close_date) < 14)
+    .sort((a, b) => daysToClose(a.close_date) - daysToClose(b.close_date))
+    .slice(0, 5)
+
+  // ── Today's Schedule ────────────────────────────────────────────────────
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const todayFollowups = followups.filter(f => (f.scheduled_at || '').slice(0, 10) === todayStr)
+
+  const typeIcons = { call: '📞', email: '📧', meeting: '📅', demo: '🎯', other: '💬' }
+
   return (
-    <div className="space-y-7 animate-fadeIn">
+    <div className="space-y-7 animate-fadeIn pb-24">
       {/* Toast */}
       {toast && (
         <div className="fixed top-6 right-6 z-[60] bg-emerald-600 text-white text-sm font-semibold px-5 py-3 rounded-2xl shadow-xl flex items-center gap-2 animate-fadeIn">
@@ -310,7 +423,7 @@ export default function Dashboard() {
             Executive Command Center
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-            Pipeline velocity, deal analytics, customer intelligence & revenue forecasting.
+            Pipeline velocity, deal analytics, customer intelligence &amp; revenue forecasting.
           </p>
         </div>
         <div className="flex items-center gap-2.5 flex-wrap">
@@ -333,29 +446,35 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Overdue Alert */}
-      {data.overdueFollowups > 0 && (
-        <div className="bg-gradient-to-r from-rose-50 via-amber-50 to-rose-50 border border-rose-200 text-rose-900 rounded-2xl px-5 py-3.5 shadow-xs flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-rose-500 text-white flex items-center justify-center shrink-0 shadow-sm">
-              <AlertTriangle className="w-5 h-5" />
+      {/* ── Smart Alerts Bar ─────────────────────────────────────────────── */}
+      {visibleAlerts.length > 0 && (
+        <div className="space-y-2">
+          {visibleAlerts.map(alert => (
+            <div
+              key={alert.id}
+              className={`border rounded-2xl px-5 py-3 flex items-center justify-between gap-3 ${alert.color}`}
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-lg leading-none">{alert.icon}</span>
+                <p className="text-sm font-semibold">{alert.text}</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Link
+                  to={alert.link}
+                  className="text-xs font-bold underline underline-offset-2 hover:opacity-70 transition-opacity"
+                >
+                  View →
+                </Link>
+                <button
+                  onClick={() => setDismissedAlerts(prev => new Set([...prev, alert.id]))}
+                  className="p-1 rounded-lg hover:bg-black/10 transition-colors"
+                  aria-label="Dismiss alert"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
-            <div>
-              <p className="text-sm font-bold text-rose-950">
-                Action Required: {data.overdueFollowups} Overdue Follow-Up{data.overdueFollowups > 1 ? 's' : ''}
-              </p>
-              <p className="text-xs text-rose-700">
-                Unresolved touches may jeopardize deal momentum. Review the follow-ups queue immediately.
-              </p>
-            </div>
-          </div>
-          <Link
-            to="/followups"
-            className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-lg shadow-xs transition-colors shrink-0"
-          >
-            <span>Resolve Now</span>
-            <ArrowUpRight className="w-3.5 h-3.5" />
-          </Link>
+          ))}
         </div>
       )}
 
@@ -426,9 +545,8 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* Revenue Target + Health Score Row */}
+      {/* Revenue Target + Health Score */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Revenue Target Progress */}
         <div className="lg:col-span-2 glass-card p-6">
           <div className="flex items-center gap-2.5 mb-5">
             <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
@@ -461,7 +579,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Pipeline Health Score */}
         <div className="glass-card p-6 flex flex-col items-center justify-center text-center">
           <div className="flex items-center gap-2 mb-4">
             <Shield className="w-4 h-4 text-indigo-600" />
@@ -481,9 +598,46 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Charts Row */}
+      {/* ── Revenue Forecast AreaChart ──────────────────────────────────── */}
+      <div className="glass-card p-6">
+        <div className="flex items-center gap-2.5 mb-5">
+          <div className="w-8 h-8 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center">
+            <TrendingUp className="w-4 h-4" />
+          </div>
+          <div>
+            <h2 className="text-base font-bold text-slate-800 tracking-tight">Revenue Forecast</h2>
+            <p className="text-xs text-slate-400">Actual closed-won vs weighted pipeline — last 6 months</p>
+          </div>
+        </div>
+        <div className="h-56 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={monthlyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+              <defs>
+                <linearGradient id="gradActual" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.25} />
+                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="gradPipeline" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.25} />
+                  <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <XAxis dataKey="month" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={{ stroke: '#e2e8f0' }} />
+              <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={{ stroke: '#e2e8f0' }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
+              <Tooltip
+                formatter={(value, name) => [`$${Number(value).toLocaleString()}`, name]}
+                contentStyle={{ borderRadius: 10, fontSize: 12, border: '1px solid #e2e8f0' }}
+              />
+              <Area type="monotone" dataKey="actual" name="Actual" stroke="#6366f1" strokeWidth={2} fill="url(#gradActual)" />
+              <Area type="monotone" dataKey="pipeline" name="Pipeline" stroke="#8b5cf6" strokeWidth={2} fill="url(#gradPipeline)" strokeDasharray="4 2" />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* ── Charts Row ─────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Leads Bar Chart */}
         <div className="glass-card p-6">
           <div className="flex items-center justify-between mb-5">
             <div>
@@ -506,7 +660,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Deals Donut */}
         <div className="glass-card p-6">
           <div className="flex items-center justify-between mb-5">
             <div>
@@ -560,38 +713,108 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Bottom Row: Top Accounts + Activity Log */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Top Key Accounts */}
-        {data.topAccounts && data.topAccounts.length > 0 && (
-          <div className="glass-card p-6">
-            <div className="flex items-center gap-2.5 mb-4">
-              <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
-                <Star className="w-4 h-4" />
-              </div>
-              <div>
-                <h2 className="text-base font-bold text-slate-800 tracking-tight">Top Key Accounts</h2>
-                <p className="text-xs text-slate-400">By closed-won revenue (LTV)</p>
-              </div>
+      {/* ── Bottom: Activity Heatmap + Deals at Risk + Schedule ─────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        {/* Activity Heatmap */}
+        <div className="lg:col-span-2 glass-card p-6">
+          <div className="flex items-center gap-2.5 mb-4">
+            <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+              <Activity className="w-4 h-4" />
             </div>
-            <div className="space-y-2">
-              {data.topAccounts.map((acc, i) => (
-                <div key={acc.id} className="flex items-center gap-3 p-3 bg-slate-50 hover:bg-slate-100/80 rounded-xl border border-slate-200/80 transition-colors group">
-                  <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center text-[11px] font-extrabold text-white shrink-0">
-                    {i + 1}
-                  </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-800 tracking-tight">Activity Heatmap</h2>
+              <p className="text-xs text-slate-400">Pipeline events over last 70 days</p>
+            </div>
+          </div>
+          <div className="grid grid-rows-7 grid-flow-col gap-1">
+            {heatmapCells.map((cell, i) => (
+              <div
+                key={i}
+                className={`w-4 h-4 rounded-sm cursor-default ${heatColor(cell.count)}`}
+                title={`${cell.dateStr}: ${cell.count} event${cell.count !== 1 ? 's' : ''}`}
+              />
+            ))}
+          </div>
+          <div className="flex items-center gap-2 mt-3 text-[10px] text-slate-400">
+            <span>Less</span>
+            {['bg-slate-100', 'bg-indigo-200', 'bg-indigo-400', 'bg-indigo-600'].map(c => (
+              <div key={c} className={`w-3.5 h-3.5 rounded-sm ${c}`} />
+            ))}
+            <span>More</span>
+          </div>
+        </div>
+
+        {/* Today's Schedule */}
+        <div className="glass-card p-6 flex flex-col">
+          <div className="flex items-center gap-2.5 mb-4">
+            <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <Calendar className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-800 tracking-tight">Today's Schedule</h2>
+              <p className="text-xs text-slate-400">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</p>
+            </div>
+          </div>
+          {todayFollowups.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center">
+              <p className="text-sm text-slate-400 text-center py-6">No activities today</p>
+            </div>
+          ) : (
+            <div className="space-y-3 flex-1 overflow-y-auto max-h-64">
+              {todayFollowups.map(f => (
+                <div key={f.id} className="flex items-start gap-3 p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                  <span className="text-base leading-none mt-0.5">{typeIcons[f.type] || '💬'}</span>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-bold text-slate-800 truncate">{acc.name}</div>
-                    <div className="text-xs text-slate-500 truncate">{acc.company}</div>
-                  </div>
-                  <div className="text-sm font-extrabold text-emerald-700 shrink-0">
-                    ${Number(acc.revenue).toLocaleString()}
+                    <p className="text-xs font-bold text-slate-900">{f.customer_name}</p>
+                    <p className="text-[11px] text-slate-500 truncate">{f.notes}</p>
+                    <p className="text-[10px] text-indigo-500 font-medium mt-0.5">
+                      {(f.scheduled_at || '').slice(11, 16)} · {f.type}
+                    </p>
                   </div>
                 </div>
               ))}
             </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Deals at Risk + Top Accounts + Activity Log ───────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        {/* Deals at Risk */}
+        <div className="glass-card p-6">
+          <div className="flex items-center gap-2.5 mb-4">
+            <div className="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center">
+              <AlertTriangle className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-800 tracking-tight">Top 5 Deals at Risk</h2>
+              <p className="text-xs text-slate-400">Closing within 14 days — sorted by urgency</p>
+            </div>
           </div>
-        )}
+          {dealsAtRisk.length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-6">No deals closing imminently</p>
+          ) : (
+            <div className="space-y-2">
+              {dealsAtRisk.map(d => {
+                const days = daysToClose(d.close_date)
+                const badgeColor = days < 0 ? 'bg-rose-100 text-rose-700' : days <= 3 ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-600'
+                return (
+                  <div key={d.id} className="flex items-center justify-between gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-slate-900 truncate">{d.title}</p>
+                      <p className="text-[11px] text-slate-500 truncate">{d.customer_name} · ${Number(d.value).toLocaleString()}</p>
+                    </div>
+                    <span className={`shrink-0 px-2 py-0.5 rounded-full text-[11px] font-bold ${badgeColor}`}>
+                      {days < 0 ? `${Math.abs(days)}d overdue` : `${days}d left`}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
 
         {/* Workflow Activity Log */}
         <div className="glass-card p-6">
@@ -602,7 +825,7 @@ export default function Dashboard() {
               </div>
               <div>
                 <h2 className="text-base font-bold text-slate-800 tracking-tight">Live Audit Trail</h2>
-                <p className="text-xs text-slate-400">Automated state transitions & events</p>
+                <p className="text-xs text-slate-400">Automated state transitions &amp; events</p>
               </div>
             </div>
             <button onClick={() => setQuickLog(true)} className="btn-sm-blue">
@@ -636,6 +859,45 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* Top Key Accounts */}
+      {data.topAccounts && data.topAccounts.length > 0 && (
+        <div className="glass-card p-6">
+          <div className="flex items-center gap-2.5 mb-4">
+            <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
+              <Star className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-800 tracking-tight">Top Key Accounts</h2>
+              <p className="text-xs text-slate-400">By closed-won revenue (LTV)</p>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {data.topAccounts.map((acc, i) => (
+              <div key={acc.id} className="flex items-center gap-3 p-3 bg-slate-50 hover:bg-slate-100/80 rounded-xl border border-slate-200/80 transition-colors group">
+                <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center text-[11px] font-extrabold text-white shrink-0">
+                  {i + 1}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-bold text-slate-800 truncate">{acc.name}</div>
+                  <div className="text-xs text-slate-500 truncate">{acc.company}</div>
+                </div>
+                <div className="text-sm font-extrabold text-emerald-700 shrink-0">
+                  ${Number(acc.revenue).toLocaleString()}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* QuickAddBar FAB */}
+      <QuickAddBar
+        onAddCustomer={() => navigate('/customers')}
+        onAddLead={() => navigate('/leads')}
+        onAddDeal={() => navigate('/pipeline')}
+        onAddFollowup={() => navigate('/followups')}
+      />
     </div>
   )
 }
