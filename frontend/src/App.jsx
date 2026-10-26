@@ -10,7 +10,7 @@ import { Sparkles, Shield, Cpu, ExternalLink } from 'lucide-react'
 
 function App() {
   return (
-    <Router>
+    <Router basename={import.meta.env.BASE_URL}>
       <div className="min-h-screen bg-slate-50/70 flex flex-col font-sans text-slate-800 relative selection:bg-indigo-500 selection:text-white">
         {/* Subtle Ambient Background Gradient Lighting */}
         <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">

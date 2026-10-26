@@ -1,10 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// Base path: '/' locally, '/Customer-Relationship-Management-Platform/' on GitHub Pages
-const base = process.env.GITHUB_PAGES === 'true'
-  ? '/Customer-Relationship-Management-Platform/'
-  : '/'
+// Base path: allows VITE_BASE_PATH override, defaults to '/Customer-Relationship-Management-Platform/' on GitHub Pages, '/' locally
+const base = process.env.VITE_BASE_PATH
+  || (process.env.GITHUB_PAGES === 'true' ? '/Customer-Relationship-Management-Platform/' : '/')
 
 export default defineConfig({
   base,

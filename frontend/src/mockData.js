@@ -522,21 +522,112 @@ export const quickLogActivity = async (data) => {
 export const getAnalytics = async () => {
   await delay()
   const store = load()
-  const { leads, deals, followups } = store
+  const { leads, deals, followups, customers } = store
+
+  const STAGE_WEIGHTS = {
+    prospect: 0.20,
+    proposal: 0.50,
+    negotiation: 0.80,
+    'closed-won': 1.00,
+    'closed-lost': 0.00,
+  }
+
+  let unweightedPipeline = 0
+  let weightedPipeline = 0
+  let closedWonValue = 0
+  let closedLostValue = 0
+  let wonCount = 0
+  let lostCount = 0
+
+  const stageBreakdown = {
+    prospect: { count: 0, total: 0, weighted: 0, probability: 20 },
+    proposal: { count: 0, total: 0, weighted: 0, probability: 50 },
+    negotiation: { count: 0, total: 0, weighted: 0, probability: 80 },
+    'closed-won': { count: 0, total: 0, weighted: 0, probability: 100 },
+    'closed-lost': { count: 0, total: 0, weighted: 0, probability: 0 },
+  }
+
+  for (const d of deals) {
+    const val = Number(d.value || 0)
+    const stage = d.stage || 'prospect'
+    const weight = STAGE_WEIGHTS[stage] ?? 0.2
+
+    if (stageBreakdown[stage]) {
+      stageBreakdown[stage].count += 1
+      stageBreakdown[stage].total += val
+      stageBreakdown[stage].weighted += Math.round(val * weight)
+    }
+
+    if (stage === 'closed-won') {
+      closedWonValue += val
+      wonCount += 1
+    } else if (stage === 'closed-lost') {
+      closedLostValue += val
+      lostCount += 1
+    } else {
+      unweightedPipeline += val
+      weightedPipeline += Math.round(val * weight)
+    }
+  }
+
+  const totalResolved = wonCount + lostCount
+  const winRate = totalResolved > 0 ? Math.round((wonCount / totalResolved) * 100) : (wonCount > 0 ? 100 : 0)
+  const avgWonDeal = wonCount > 0 ? Math.round(closedWonValue / wonCount) : 0
+
+  const totalLeads = leads.length
   const convertedLeads = leads.filter(l => l.status === 'converted').length
-  const leadConversionRate = leads.length ? Math.round((convertedLeads / leads.length) * 100) : 0
-  const wonDeals = deals.filter(d => d.stage === 'closed-won').length
-  const closedDeals = deals.filter(d => ['closed-won','closed-lost'].includes(d.stage)).length
-  const winRate = closedDeals ? Math.round((wonDeals / closedDeals) * 100) : 0
+  const leadConversionRate = totalLeads > 0 ? Math.round((convertedLeads / totalLeads) * 100) : 0
+
+  const totalFollowups = followups.length
+  const overdueFollowups = followups.filter(f => f.status === 'pending' && new Date(f.scheduled_at) < new Date()).length
   const completedFollowups = followups.filter(f => f.status === 'completed').length
-  const followupCompletionRate = followups.length ? Math.round((completedFollowups / followups.length) * 100) : 0
-  const healthScore = Math.round((winRate * 0.4) + (leadConversionRate * 0.3) + (followupCompletionRate * 0.3))
-  const activeDealValues = deals.filter(d => !['closed-won','closed-lost'].includes(d.stage))
-  const weightedPipeline = Math.round(activeDealValues.reduce((s, d) => {
-    const weight = { prospect: 0.2, proposal: 0.5, negotiation: 0.8 }[d.stage] ?? 0
-    return s + Number(d.value || 0) * weight
-  }, 0))
-  return ok({ performance: { convertedLeads, leadConversionRate, winRate, followupCompletionRate, healthScore }, forecast: { weightedPipeline } })
+  const followupCompletionRate = totalFollowups > 0 ? Math.round((completedFollowups / totalFollowups) * 100) : 100
+
+  let healthScore = 70
+  if (winRate >= 50) healthScore += 15
+  else if (winRate < 25) healthScore -= 10
+  if (overdueFollowups === 0) healthScore += 15
+  else healthScore -= Math.min(30, overdueFollowups * 10)
+  if (unweightedPipeline > 50000) healthScore += 10
+  healthScore = Math.max(10, Math.min(100, healthScore))
+
+  const topCustomers = (customers || []).map(c => {
+    const custWonDeals = deals.filter(d => d.customer_id === c.id && d.stage === 'closed-won')
+    const count = custWonDeals.length
+    const lifetimeValue = custWonDeals.reduce((sum, d) => sum + Number(d.value || 0), 0)
+    return {
+      id: c.id,
+      name: c.name,
+      company: c.company,
+      email: c.email,
+      won_deals_count: count,
+      lifetime_value: lifetimeValue,
+    }
+  }).filter(c => c.lifetime_value > 0).sort((a, b) => b.lifetime_value - a.lifetime_value).slice(0, 5)
+
+  return ok({
+    forecast: {
+      unweightedPipeline,
+      weightedPipeline,
+      closedWonValue,
+      closedLostValue,
+      totalPipelineDeals: deals.length - totalResolved,
+    },
+    performance: {
+      winRate,
+      wonCount,
+      lostCount,
+      avgWonDeal,
+      leadConversionRate,
+      totalLeads,
+      convertedLeads,
+      followupCompletionRate,
+      overdueFollowups,
+      healthScore,
+    },
+    stageBreakdown,
+    topCustomers,
+  })
 }
 
 // ─── SEARCH ───────────────────────────────────────────────────────────────────
@@ -553,8 +644,25 @@ export const searchAll = async (q) => {
   return ok(results)
 }
 
-// ─── EXPORT (no-op in demo) ───────────────────────────────────────────────────
+// ─── EXPORT ───────────────────────────────────────────────────────────────────
 export const exportData = async (type) => {
   await delay()
-  return ok(new Blob([`Demo export for: ${type}`], { type: 'text/plain' }))
+  const store = load()
+  let csv = ''
+  if (type === 'deals') {
+    csv = 'ID,Title,Customer,Stage,Value,Close Date\n' +
+      store.deals.map(d => `${d.id},"${d.title}","${d.customer_name || ''}","${d.stage}",${d.value || 0},"${d.close_date || ''}"`).join('\n')
+  } else if (type === 'leads') {
+    csv = 'ID,Title,Customer,Source,Status,Value\n' +
+      store.leads.map(l => `${l.id},"${l.title}","${l.customer_name || ''}","${l.source}","${l.status}",${l.value || 0}`).join('\n')
+  } else if (type === 'customers') {
+    csv = 'ID,Name,Email,Phone,Company,Status,Lifetime Value\n' +
+      store.customers.map(c => `${c.id},"${c.name}","${c.email}","${c.phone}","${c.company}","${c.status}",${c.lifetime_value || 0}`).join('\n')
+  } else {
+    csv = 'Metric,Value\n' +
+      `Total Deals,${store.deals.length}\n` +
+      `Total Leads,${store.leads.length}\n` +
+      `Total Customers,${store.customers.length}\n`
+  }
+  return ok(new Blob([csv], { type: 'text/csv' }))
 }
